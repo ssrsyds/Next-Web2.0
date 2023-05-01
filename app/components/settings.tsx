@@ -390,20 +390,6 @@ export function Settings() {
           )}
 
           <ListItem
-            title={Locale.Settings.Token.Title}
-            subTitle={Locale.Settings.Token.SubTitle}
-          >
-            <PasswordInput
-              value={accessStore.token}
-              type="text"
-              placeholder={Locale.Settings.Token.Placeholder}
-              onChange={(e) => {
-                accessStore.updateToken(e.currentTarget.value);
-              }}
-            />
-          </ListItem>
-
-          <ListItem
             title={Locale.Settings.Usage.Title}
             subTitle={
               showUsage
