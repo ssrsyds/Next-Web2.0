@@ -1,143 +1,90 @@
-import { useState, useEffect, useMemo, HTMLProps, useRef } from "react";
+import { useState, useEffect, useMemo, HTMLProps } from "react";
+
+import EmojiPicker, { Theme as EmojiTheme } from "emoji-picker-react";
 
 import styles from "./settings.module.scss";
 
 import ResetIcon from "../icons/reload.svg";
 import CloseIcon from "../icons/close.svg";
-import CopyIcon from "../icons/copy.svg";
 import ClearIcon from "../icons/clear.svg";
 import EditIcon from "../icons/edit.svg";
-import { Input, List, ListItem, Modal, PasswordInput, Popover } from "./ui-lib";
-import { ModelConfigList } from "./model-config";
+import EyeIcon from "../icons/eye.svg";
+import EyeOffIcon from "../icons/eye-off.svg";
+
+import { List, ListItem, Popover, showToast } from "./ui-lib";
 
 import { IconButton } from "./button";
 import {
   SubmitKey,
   useChatStore,
   Theme,
+  ALL_MODELS,
   useUpdateStore,
   useAccessStore,
-  useAppConfig,
+  ModalConfigValidator,
 } from "../store";
+import { Avatar } from "./chat";
 
 import Locale, { AllLangs, changeLang, getLang } from "../locales";
-import { copyToClipboard } from "../utils";
+import { getEmojiUrl } from "../utils";
 import Link from "next/link";
-import { Path, UPDATE_URL } from "../constant";
-import { Prompt, SearchService, usePromptStore } from "../store/prompt";
+import { UPDATE_URL } from "../constant";
+import { SearchService, usePromptStore } from "../store/prompt";
+import { requestUsage } from "../requests";
 import { ErrorBoundary } from "./error";
 import { InputRange } from "./input-range";
-import { useNavigate } from "react-router-dom";
-import { Avatar, AvatarPicker } from "./emoji";
 
-function UserPromptModal(props: { onClose?: () => void }) {
-  const promptStore = usePromptStore();
-  const userPrompts = promptStore.getUserPrompts();
-  const builtinPrompts = SearchService.builtinPrompts;
-  const allPrompts = userPrompts.concat(builtinPrompts);
-  const [searchInput, setSearchInput] = useState("");
-  const [searchPrompts, setSearchPrompts] = useState<Prompt[]>([]);
-  const prompts = searchInput.length > 0 ? searchPrompts : allPrompts;
+function SettingItem(props: {
+  title: string;
+  subTitle?: string;
+  children: JSX.Element;
+}) {
+  return (
+    <ListItem>
+      <div className={styles["settings-title"]}>
+        <div>{props.title}</div>
+        {props.subTitle && (
+          <div className={styles["settings-sub-title"]}>{props.subTitle}</div>
+        )}
+      </div>
+      {props.children}
+    </ListItem>
+  );
+}
 
-  useEffect(() => {
-    if (searchInput.length > 0) {
-      const searchResult = SearchService.search(searchInput);
-      setSearchPrompts(searchResult);
-    } else {
-      setSearchPrompts([]);
-    }
-  }, [searchInput]);
+function PasswordInput(props: HTMLProps<HTMLInputElement>) {
+  const [visible, setVisible] = useState(false);
+
+  function changeVisibility() {
+    setVisible(!visible);
+  }
 
   return (
-    <div className="modal-mask">
-      <Modal
-        title={Locale.Settings.Prompt.Modal.Title}
-        onClose={() => props.onClose?.()}
-        actions={[
-          <IconButton
-            key="add"
-            onClick={() => promptStore.add({ title: "", content: "" })}
-            icon={<ClearIcon />}
-            bordered
-            text={Locale.Settings.Prompt.Modal.Add}
-          />,
-        ]}
-      >
-        <div className={styles["user-prompt-modal"]}>
-          <input
-            type="text"
-            className={styles["user-prompt-search"]}
-            placeholder={Locale.Settings.Prompt.Modal.Search}
-            value={searchInput}
-            onInput={(e) => setSearchInput(e.currentTarget.value)}
-          ></input>
-
-          <div className={styles["user-prompt-list"]}>
-            {prompts.map((v, _) => (
-              <div className={styles["user-prompt-item"]} key={v.id ?? v.title}>
-                <div className={styles["user-prompt-header"]}>
-                  <input
-                    type="text"
-                    className={styles["user-prompt-title"]}
-                    value={v.title}
-                    readOnly={!v.isUser}
-                    onChange={(e) => {
-                      if (v.isUser) {
-                        promptStore.updateUserPrompts(
-                          v.id!,
-                          (prompt) => (prompt.title = e.currentTarget.value),
-                        );
-                      }
-                    }}
-                  ></input>
-
-                  <div className={styles["user-prompt-buttons"]}>
-                    {v.isUser && (
-                      <IconButton
-                        icon={<ClearIcon />}
-                        bordered
-                        className={styles["user-prompt-button"]}
-                        onClick={() => promptStore.remove(v.id!)}
-                      />
-                    )}
-                    <IconButton
-                      icon={<CopyIcon />}
-                      bordered
-                      className={styles["user-prompt-button"]}
-                      onClick={() => copyToClipboard(v.content)}
-                    />
-                  </div>
-                </div>
-                <Input
-                  rows={2}
-                  value={v.content}
-                  className={styles["user-prompt-content"]}
-                  readOnly={!v.isUser}
-                  onChange={(e) => {
-                    if (v.isUser) {
-                      promptStore.updateUserPrompts(
-                        v.id!,
-                        (prompt) => (prompt.content = e.currentTarget.value),
-                      );
-                    }
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      </Modal>
+    <div className={styles["password-input-container"]}>
+      <IconButton
+        icon={visible ? <EyeIcon /> : <EyeOffIcon />}
+        onClick={changeVisibility}
+        className={styles["password-eye"]}
+      />
+      <input
+        {...props}
+        type={visible ? "text" : "password"}
+        className={styles["password-input"]}
+      />
     </div>
   );
 }
 
-export function Settings() {
-  const navigate = useNavigate();
+export function Settings(props: { closeSettings: () => void }) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const config = useAppConfig();
-  const updateConfig = config.update;
-  const resetConfig = config.reset;
-  const chatStore = useChatStore();
+  const [config, updateConfig, resetConfig, clearAllData, clearSessions] =
+    useChatStore((state) => [
+      state.config,
+      state.updateConfig,
+      state.resetConfig,
+      state.clearAllData,
+      state.clearSessions,
+    ]);
 
   const updateStore = useUpdateStore();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -152,16 +99,18 @@ export function Settings() {
     });
   }
 
-  const usage = {
-    used: updateStore.used,
-    subscription: updateStore.subscription,
-  };
+  const [usage, setUsage] = useState<{
+    used?: number;
+    subscription?: number;
+  }>();
   const [loadingUsage, setLoadingUsage] = useState(false);
-  function checkUsage(force = false) {
+  function checkUsage() {
     setLoadingUsage(true);
-    updateStore.updateUsage(force).finally(() => {
-      setLoadingUsage(false);
-    });
+    requestUsage()
+      .then((res) => setUsage(res))
+      .finally(() => {
+        setLoadingUsage(false);
+      });
   }
 
   const accessStore = useAccessStore();
@@ -173,12 +122,10 @@ export function Settings() {
 
   const promptStore = usePromptStore();
   const builtinCount = SearchService.count.builtin;
-  const customCount = promptStore.getUserPrompts().length ?? 0;
-  const [shouldShowPromptModal, setShowPromptModal] = useState(false);
+  const customCount = promptStore.prompts.size ?? 0;
 
   const showUsage = accessStore.isAuthorized();
   useEffect(() => {
-    // checks per minutes
     checkUpdate();
     showUsage && checkUsage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,7 +134,7 @@ export function Settings() {
   useEffect(() => {
     const keydownEvent = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        navigate(Path.Home);
+        props.closeSettings();
       }
     };
     document.addEventListener("keydown", keydownEvent);
@@ -199,33 +146,39 @@ export function Settings() {
 
   return (
     <ErrorBoundary>
-      <div className="window-header">
-        <div className="window-header-title">
-          <div className="window-header-main-title">
+      <div className={styles["window-header"]}>
+        <div className={styles["window-header-title"]}>
+          <div className={styles["window-header-main-title"]}>
             {Locale.Settings.Title}
           </div>
-          <div className="window-header-sub-title">
+          <div className={styles["window-header-sub-title"]}>
             {Locale.Settings.SubTitle}
           </div>
         </div>
-        <div className="window-actions">
-          <div className="window-action-button">
+        <div className={styles["window-actions"]}>
+          <div className={styles["window-action-button"]}>
             <IconButton
               icon={<ClearIcon />}
               onClick={() => {
-                if (confirm(Locale.Settings.Actions.ConfirmClearAll)) {
-                  chatStore.clearAllData();
+                const confirmed = window.confirm(
+                  `${Locale.Settings.Actions.ConfirmClearAll.Confirm}`,
+                );
+                if (confirmed) {
+                  clearSessions();
                 }
               }}
               bordered
               title={Locale.Settings.Actions.ClearAll}
             />
           </div>
-          <div className="window-action-button">
+          <div className={styles["window-action-button"]}>
             <IconButton
               icon={<ResetIcon />}
               onClick={() => {
-                if (confirm(Locale.Settings.Actions.ConfirmResetAll)) {
+                const confirmed = window.confirm(
+                  `${Locale.Settings.Actions.ConfirmResetAll.Confirm}`,
+                );
+                if (confirmed) {
                   resetConfig();
                 }
               }}
@@ -233,10 +186,10 @@ export function Settings() {
               title={Locale.Settings.Actions.ResetAll}
             />
           </div>
-          <div className="window-action-button">
+          <div className={styles["window-action-button"]}>
             <IconButton
               icon={<CloseIcon />}
-              onClick={() => navigate(Path.Home)}
+              onClick={props.closeSettings}
               bordered
               title={Locale.Settings.Actions.Close}
             />
@@ -245,13 +198,16 @@ export function Settings() {
       </div>
       <div className={styles["settings"]}>
         <List>
-          <ListItem title={Locale.Settings.Avatar}>
+          <SettingItem title={Locale.Settings.Avatar}>
             <Popover
               onClose={() => setShowEmojiPicker(false)}
               content={
-                <AvatarPicker
-                  onEmojiClick={(avatar: string) => {
-                    updateConfig((config) => (config.avatar = avatar));
+                <EmojiPicker
+                  lazyLoadEmojis
+                  theme={EmojiTheme.AUTO}
+                  getEmojiUrl={getEmojiUrl}
+                  onEmojiClick={(e) => {
+                    updateConfig((config) => (config.avatar = e.unified));
                     setShowEmojiPicker(false);
                   }}
                 />
@@ -262,12 +218,12 @@ export function Settings() {
                 className={styles.avatar}
                 onClick={() => setShowEmojiPicker(true)}
               >
-                <Avatar avatar={config.avatar} />
+                <Avatar role="user" />
               </div>
             </Popover>
-          </ListItem>
+          </SettingItem>
 
-          <ListItem title={Locale.Settings.SendKey}>
+          <SettingItem title={Locale.Settings.SendKey}>
             <select
               value={config.submitKey}
               onChange={(e) => {
@@ -283,9 +239,12 @@ export function Settings() {
                 </option>
               ))}
             </select>
-          </ListItem>
+          </SettingItem>
 
-          <ListItem title={Locale.Settings.Theme}>
+          <ListItem>
+            <div className={styles["settings-title"]}>
+              {Locale.Settings.Theme}
+            </div>
             <select
               value={config.theme}
               onChange={(e) => {
@@ -302,7 +261,7 @@ export function Settings() {
             </select>
           </ListItem>
 
-          <ListItem title={Locale.Settings.Lang.Name}>
+          <SettingItem title={Locale.Settings.Lang.Name}>
             <select
               value={getLang()}
               onChange={(e) => {
@@ -315,9 +274,9 @@ export function Settings() {
                 </option>
               ))}
             </select>
-          </ListItem>
+          </SettingItem>
 
-          <ListItem
+          <SettingItem
             title={Locale.Settings.FontSize.Title}
             subTitle={Locale.Settings.FontSize.SubTitle}
           >
@@ -334,12 +293,21 @@ export function Settings() {
                 )
               }
             ></InputRange>
-          </ListItem>
+          </SettingItem>
 
-          <ListItem
-            title={Locale.Settings.SendPreviewBubble.Title}
-            subTitle={Locale.Settings.SendPreviewBubble.SubTitle}
-          >
+          <SettingItem title={Locale.Settings.TightBorder}>
+            <input
+              type="checkbox"
+              checked={config.tightBorder}
+              onChange={(e) =>
+                updateConfig(
+                  (config) => (config.tightBorder = e.currentTarget.checked),
+                )
+              }
+            ></input>
+          </SettingItem>
+
+          <SettingItem title={Locale.Settings.SendPreviewBubble}>
             <input
               type="checkbox"
               checked={config.sendPreviewBubble}
@@ -350,29 +318,12 @@ export function Settings() {
                 )
               }
             ></input>
-          </ListItem>
-
-          <ListItem
-            title={Locale.Settings.Mask.Title}
-            subTitle={Locale.Settings.Mask.SubTitle}
-          >
-            <input
-              type="checkbox"
-              checked={!config.dontShowMaskSplashScreen}
-              onChange={(e) =>
-                updateConfig(
-                  (config) =>
-                    (config.dontShowMaskSplashScreen =
-                      !e.currentTarget.checked),
-                )
-              }
-            ></input>
-          </ListItem>
+          </SettingItem>
         </List>
 
         <List>
           {enabledAccessControl ? (
-            <ListItem
+            <SettingItem
               title={Locale.Settings.AccessCode.Title}
               subTitle={Locale.Settings.AccessCode.SubTitle}
             >
@@ -384,13 +335,52 @@ export function Settings() {
                   accessStore.updateCode(e.currentTarget.value);
                 }}
               />
-            </ListItem>
+            </SettingItem>
           ) : (
             <></>
           )}
 
+          <SettingItem
+            title={Locale.Settings.HistoryCount.Title}
+            subTitle={Locale.Settings.HistoryCount.SubTitle}
+          >
+            <InputRange
+              title={config.historyMessageCount.toString()}
+              value={config.historyMessageCount}
+              min="0"
+              max="25"
+              step="1"
+              onChange={(e) =>
+                updateConfig(
+                  (config) =>
+                    (config.historyMessageCount = e.target.valueAsNumber),
+                )
+              }
+            ></InputRange>
+          </SettingItem>
+
+          <SettingItem
+            title={Locale.Settings.CompressThreshold.Title}
+            subTitle={Locale.Settings.CompressThreshold.SubTitle}
+          >
+            <input
+              type="number"
+              min={500}
+              max={4000}
+              value={config.compressMessageLengthThreshold}
+              onChange={(e) =>
+                updateConfig(
+                  (config) =>
+                    (config.compressMessageLengthThreshold =
+                      e.currentTarget.valueAsNumber),
+                )
+              }
+            ></input>
+          </SettingItem>
+        </List>
+
         <List>
-          <ListItem
+          <SettingItem
             title={Locale.Settings.Prompt.Disable.Title}
             subTitle={Locale.Settings.Prompt.Disable.SubTitle}
           >
@@ -404,9 +394,9 @@ export function Settings() {
                 )
               }
             ></input>
-          </ListItem>
+          </SettingItem>
 
-          <ListItem
+          <SettingItem
             title={Locale.Settings.Prompt.List}
             subTitle={Locale.Settings.Prompt.ListCount(
               builtinCount,
@@ -416,25 +406,92 @@ export function Settings() {
             <IconButton
               icon={<EditIcon />}
               text={Locale.Settings.Prompt.Edit}
-              onClick={() => setShowPromptModal(true)}
+              onClick={() => showToast(Locale.WIP)}
             />
-          </ListItem>
+          </SettingItem>
         </List>
 
         <List>
-          <ModelConfigList
-            modelConfig={config.modelConfig}
-            updateConfig={(upater) => {
-              const modelConfig = { ...config.modelConfig };
-              upater(modelConfig);
-              config.update((config) => (config.modelConfig = modelConfig));
-            }}
-          />
+          <SettingItem title={Locale.Settings.Model}>
+            <select
+              value={config.modelConfig.model}
+              onChange={(e) => {
+                updateConfig(
+                  (config) =>
+                    (config.modelConfig.model = ModalConfigValidator.model(
+                      e.currentTarget.value,
+                    )),
+                );
+              }}
+            >
+              {ALL_MODELS.map((v) => (
+                <option value={v.name} key={v.name} disabled={!v.available}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </SettingItem>
+          <SettingItem
+            title={Locale.Settings.Temperature.Title}
+            subTitle={Locale.Settings.Temperature.SubTitle}
+          >
+            <InputRange
+              value={config.modelConfig.temperature?.toFixed(1)}
+              min="0"
+              max="2"
+              step="0.1"
+              onChange={(e) => {
+                updateConfig(
+                  (config) =>
+                    (config.modelConfig.temperature =
+                      ModalConfigValidator.temperature(
+                        e.currentTarget.valueAsNumber,
+                      )),
+                );
+              }}
+            ></InputRange>
+          </SettingItem>
+          <SettingItem
+            title={Locale.Settings.MaxTokens.Title}
+            subTitle={Locale.Settings.MaxTokens.SubTitle}
+          >
+            <input
+              type="number"
+              min={100}
+              max={32000}
+              value={config.modelConfig.max_tokens}
+              onChange={(e) =>
+                updateConfig(
+                  (config) =>
+                    (config.modelConfig.max_tokens =
+                      ModalConfigValidator.max_tokens(
+                        e.currentTarget.valueAsNumber,
+                      )),
+                )
+              }
+            ></input>
+          </SettingItem>
+          <SettingItem
+            title={Locale.Settings.PresencePenlty.Title}
+            subTitle={Locale.Settings.PresencePenlty.SubTitle}
+          >
+            <InputRange
+              value={config.modelConfig.presence_penalty?.toFixed(1)}
+              min="-2"
+              max="2"
+              step="0.5"
+              onChange={(e) => {
+                updateConfig(
+                  (config) =>
+                    (config.modelConfig.presence_penalty =
+                      ModalConfigValidator.presence_penalty(
+                        e.currentTarget.valueAsNumber,
+                      )),
+                );
+              }}
+            ></InputRange>
+          </SettingItem>
         </List>
-
-        {shouldShowPromptModal && (
-          <UserPromptModal onClose={() => setShowPromptModal(false)} />
-        )}
       </div>
     </ErrorBoundary>
   );
